@@ -1,3 +1,4 @@
+-- spy/sandbox.lua
 local Proxy  = require("./proxy")
 local Logger = require("./logger")
 
@@ -12,11 +13,9 @@ function Sandbox.create()
     env.print = function(...)
         local args = table.pack(...)
         local parts = {}
-
         for i = 1, args.n do
             parts[i] = Proxy.stringify(args[i])
         end
-
         Logger:add("print(" .. table.concat(parts, ", ") .. ")")
     end
 
@@ -30,6 +29,21 @@ function Sandbox.create()
         Logger:add("identifyexecutor()")
         return "Tracer", "1.0"
     end
+
+    env.pairs  = Proxy.pairs
+    env.ipairs = Proxy.ipairs
+
+    env.table = {
+        new = function(...)
+            return Proxy.table({...})
+        end
+    }
+
+    setmetatable(env, {
+        __index = function(_, key)
+            return Proxy.new(key)
+        end
+    })
 
     return env
 end
