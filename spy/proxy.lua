@@ -103,6 +103,7 @@ mt = {
     end,
 
     __concat = function(a, b) return makeBinary("..", a, b) end,
+
     __len = function(self)
         local expr = { type = "len", operand = Expr.get(self) }
         Logger:add(Compiler.compile(expr))
@@ -121,7 +122,9 @@ mt = {
     __pow  = function(a, b) return makeBinary("^",  a, b) end,
     __idiv = function(a, b) return makeBinary("//", a, b) end,
 
-    __eq = function(a, b) return makeBinary("==", a, b) end,
+    __eq = function(a, b)
+        return makeBinary("==", a, b)
+    end,
     __lt = function(a, b) return makeBinary("<",  a, b) end,
     __le = function(a, b) return makeBinary("<=", a, b) end,
 
@@ -132,6 +135,22 @@ mt = {
     __shr  = function(a, b) return makeBinary(">>", a, b) end,
 
     __bnot = function(self) return makeUnary("~", self) end,
+
+    __pairs = function(self)
+        local expr = { type = "pairs", operand = Expr.get(self) }
+        Logger:add(Compiler.compile(expr))
+        local proxy = {}
+        Expr.set(proxy, expr)
+        return setmetatable(proxy, mt)
+    end,
+
+    __ipairs = function(self)
+        local expr = { type = "ipairs", operand = Expr.get(self) }
+        Logger:add(Compiler.compile(expr))
+        local proxy = {}
+        Expr.set(proxy, expr)
+        return setmetatable(proxy, mt)
+    end,
 }
 
 local function makeProxy(path)
@@ -258,6 +277,57 @@ function Proxy.break_()
     local expr = { type = "break" }
     Logger:add(Compiler.compile(expr))
     return expr
+end
+
+function Proxy.goto_(label)
+    local expr = { type = "goto", label = label }
+    Logger:add(Compiler.compile(expr))
+    return expr
+end
+
+function Proxy.label(name)
+    local expr = { type = "label", name = name }
+    Logger:add(Compiler.compile(expr))
+    return expr
+end
+
+function Proxy.function_(name, params, body)
+    local expr = {
+        type   = "function",
+        name   = name,
+        params = params or {},
+        body   = body or {}
+    }
+    Logger:add(Compiler.compile(expr))
+    local proxy = {}
+    Expr.set(proxy, expr)
+    return setmetatable(proxy, mt)
+end
+
+function Proxy.local_(names, values)
+    local vals = {}
+    for i, v in ipairs(values or {}) do
+        vals[i] = toExpr(v)
+    end
+    local expr = {
+        type   = "local",
+        names  = names or {},
+        values = vals
+    }
+    Logger:add(Compiler.compile(expr))
+    return expr
+end
+
+function Proxy.neq(a, b)
+    return makeBinary("~=", a, b)
+end
+
+function Proxy.gt(a, b)
+    return makeBinary(">", a, b)
+end
+
+function Proxy.ge(a, b)
+    return makeBinary(">=", a, b)
 end
 
 return Proxy
