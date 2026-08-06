@@ -43,6 +43,18 @@ local function makeUnary(op, operand)
     return setmetatable(proxy, mt)
 end
 
+local function makeLogic(op, left, right)
+    local expr = {
+        type  = op,
+        left  = toExpr(left),
+        right = toExpr(right)
+    }
+    Logger:add(Compiler.compile(expr))
+    local proxy = {}
+    Expr.set(proxy, expr)
+    return setmetatable(proxy, mt)
+end
+
 mt = {
     __index = function(self, key)
         local expr = {
@@ -122,9 +134,7 @@ mt = {
     __pow  = function(a, b) return makeBinary("^",  a, b) end,
     __idiv = function(a, b) return makeBinary("//", a, b) end,
 
-    __eq = function(a, b)
-        return makeBinary("==", a, b)
-    end,
+    __eq = function(a, b) return makeBinary("==", a, b) end,
     __lt = function(a, b) return makeBinary("<",  a, b) end,
     __le = function(a, b) return makeBinary("<=", a, b) end,
 
@@ -318,6 +328,22 @@ function Proxy.local_(names, values)
     return expr
 end
 
+function Proxy.and_(a, b)
+    return makeLogic("and", a, b)
+end
+
+function Proxy.or_(a, b)
+    return makeLogic("or", a, b)
+end
+
+function Proxy.not_(a)
+    local expr = { type = "not", operand = toExpr(a) }
+    Logger:add(Compiler.compile(expr))
+    local proxy = {}
+    Expr.set(proxy, expr)
+    return setmetatable(proxy, mt)
+end
+
 function Proxy.neq(a, b)
     return makeBinary("~=", a, b)
 end
@@ -328,6 +354,13 @@ end
 
 function Proxy.ge(a, b)
     return makeBinary(">=", a, b)
+end
+
+function Proxy.vararg()
+    local expr = { type = "vararg" }
+    local proxy = {}
+    Expr.set(proxy, expr)
+    return setmetatable(proxy, mt)
 end
 
 return Proxy
