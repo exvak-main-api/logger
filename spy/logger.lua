@@ -1,3 +1,4 @@
+-- spy/logger.lua
 local Logger = {
     entries = {}
 }
