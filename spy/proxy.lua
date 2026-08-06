@@ -1,33 +1,92 @@
-local Logger = require(script.Parent.logger)
+local Logger = require("./logger")
 
-local function proxy(path)
-    return setmetatable({}, {
+local Proxy = {}
 
+local paths = setmetatable({}, {
+    __mode = "k"
+})
+
+local function stringify(value)
+    if paths[value] then
+        return paths[value]
+    end
+
+    if type(value) == "string" then
+        return string.format("%q", value)
+    end
+
+    return tostring(value)
+end
+
+local function makeProxy(path)
+    local object = {}
+
+    paths[object] = path
+
+    return setmetatable(object, {
         __index = function(_, key)
-            local newPath = path .. "." .. tostring(key)
-            Logger:log("READ " .. newPath)
-            return proxy(newPath)
+            local expression
+
+            if type(key) == "string"
+                and key:match("^[%a_][%w_]*$") then
+
+                expression = path .. "." .. key
+            else
+                expression =
+                    path .. "[" .. stringify(key) .. "]"
+            end
+
+            Logger:add("INDEX", expression)
+
+            return makeProxy(expression)
         end,
 
         __newindex = function(_, key, value)
-            Logger:log(("WRITE %s.%s = %s")
-                :format(path, key, tostring(value)))
+            local expression =
+                path
+                .. "["
+                .. stringify(key)
+                .. "] = "
+                .. stringify(value)
+
+            Logger:add("WRITE", expression)
         end,
 
         __call = function(_, ...)
             local args = table.pack(...)
-
-            local s = {}
+            local output = {}
 
             for i = 1, args.n do
-                s[i] = tostring(args[i])
+                output[i] = stringify(args[i])
             end
 
-            Logger:log(path .. "(" .. table.concat(s, ", ") .. ")")
+            local expression =
+                path
+                .. "("
+                .. table.concat(output, ", ")
+                .. ")"
 
-            return proxy(path .. "()")
+            Logger:add("CALL", expression)
+
+            return makeProxy(expression)
+        end,
+
+        __tostring = function()
+            return path
+        end,
+
+        __concat = function(a, b)
+            local expression =
+                stringify(a) .. " .. " .. stringify(b)
+
+            Logger:add("CONCAT", expression)
+
+            return makeProxy("(" .. expression .. ")")
         end,
     })
 end
 
-return proxy
+Proxy.new = makeProxy
+Proxy.stringify = stringify
+
+return Proxy
