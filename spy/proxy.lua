@@ -21,7 +21,10 @@ end
 local function makeProxy(path)
     local object = {}
 
-    paths[object] = path
+    Expr.set(obj,{
+            type="global",
+            name=path
+        })
 
     return setmetatable(object, {
         __index = function(_, key)
