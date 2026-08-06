@@ -1,3 +1,4 @@
+-- spy/compiler.lua
 local Compiler = {}
 
 local locals = setmetatable({}, { __mode = "k" })
@@ -40,7 +41,6 @@ function Compiler.compile(expr)
     if t == "index" then
         local base = Compiler.compile(expr.base)
         local key  = expr.key
-
         if isIdentifier(key) then
             return base .. "." .. key
         else
@@ -53,12 +53,7 @@ function Compiler.compile(expr)
         for i, v in ipairs(expr.args or {}) do
             args[i] = Compiler.compile(v)
         end
-        return Compiler.compile(expr.base)
-            .. ":"
-            .. expr.name
-            .. "("
-            .. table.concat(args, ", ")
-            .. ")"
+        return Compiler.compile(expr.base) .. ":" .. expr.name .. "(" .. table.concat(args, ", ") .. ")"
     end
 
     if t == "call" then
@@ -66,26 +61,15 @@ function Compiler.compile(expr)
         for i, v in ipairs(expr.args or {}) do
             args[i] = Compiler.compile(v)
         end
-        return Compiler.compile(expr.base)
-            .. "("
-            .. table.concat(args, ", ")
-            .. ")"
+        return Compiler.compile(expr.base) .. "(" .. table.concat(args, ", ") .. ")"
     end
 
     if t == "assign" then
-        return Compiler.compile(expr.target)
-            .. " = "
-            .. Compiler.compile(expr.value)
+        return Compiler.compile(expr.target) .. " = " .. Compiler.compile(expr.value)
     end
 
     if t == "binary" then
-        return "("
-            .. Compiler.compile(expr.left)
-            .. " "
-            .. expr.op
-            .. " "
-            .. Compiler.compile(expr.right)
-            .. ")"
+        return "(" .. Compiler.compile(expr.left) .. " " .. expr.op .. " " .. Compiler.compile(expr.right) .. ")"
     end
 
     if t == "unary" then
@@ -98,6 +82,110 @@ function Compiler.compile(expr)
 
     if t == "paren" then
         return "(" .. Compiler.compile(expr.inner) .. ")"
+    end
+
+    if t == "table" then
+        local parts = {}
+        for i, field in ipairs(expr.fields or {}) do
+            if field.key then
+                if isIdentifier(field.key) then
+                    parts[i] = field.key .. " = " .. Compiler.compile(field.value)
+                else
+                    parts[i] = "[" .. stringify(field.key) .. "] = " .. Compiler.compile(field.value)
+                end
+            else
+                parts[i] = Compiler.compile(field.value)
+            end
+        end
+        return "{" .. table.concat(parts, ", ") .. "}"
+    end
+
+    if t == "pairs" then
+        return "pairs(" .. Compiler.compile(expr.operand) .. ")"
+    end
+
+    if t == "ipairs" then
+        return "ipairs(" .. Compiler.compile(expr.operand) .. ")"
+    end
+
+    if t == "for_numeric" then
+        local body = {}
+        for i, s in ipairs(expr.body or {}) do
+            body[i] = Compiler.compile(s)
+        end
+        return "for " .. expr.var .. " = " .. Compiler.compile(expr.start)
+            .. ", " .. Compiler.compile(expr.stop)
+            .. (expr.step and (", " .. Compiler.compile(expr.step)) or "")
+            .. " do\n  " .. table.concat(body, "\n  ") .. "\nend"
+    end
+
+    if t == "for_generic" then
+        local body = {}
+        for i, s in ipairs(expr.body or {}) do
+            body[i] = Compiler.compile(s)
+        end
+        return "for " .. table.concat(expr.vars, ", ") .. " in " .. Compiler.compile(expr.iter)
+            .. " do\n  " .. table.concat(body, "\n  ") .. "\nend"
+    end
+
+    if t == "while" then
+        local body = {}
+        for i, s in ipairs(expr.body or {}) do
+            body[i] = Compiler.compile(s)
+        end
+        return "while " .. Compiler.compile(expr.condition) .. " do\n  "
+            .. table.concat(body, "\n  ") .. "\nend"
+    end
+
+    if t == "repeat" then
+        local body = {}
+        for i, s in ipairs(expr.body or {}) do
+            body[i] = Compiler.compile(s)
+        end
+        return "repeat\n  " .. table.concat(body, "\n  ")
+            .. "\nuntil " .. Compiler.compile(expr.condition)
+    end
+
+    if t == "if" then
+        local parts = {}
+        for i, branch in ipairs(expr.branches or {}) do
+            local body = {}
+            for j, s in ipairs(branch.body or {}) do
+                body[j] = Compiler.compile(s)
+            end
+            if i == 1 then
+                parts[i] = "if " .. Compiler.compile(branch.condition) .. " then\n  " .. table.concat(body, "\n  ")
+            elseif branch.condition then
+                parts[i] = "elseif " .. Compiler.compile(branch.condition) .. " then\n  " .. table.concat(body, "\n  ")
+            else
+                parts[i] = "else\n  " .. table.concat(body, "\n  ")
+            end
+        end
+        return table.concat(parts, "\n") .. "\nend"
+    end
+
+    if t == "do" then
+        local body = {}
+        for i, s in ipairs(expr.body or {}) do
+            body[i] = Compiler.compile(s)
+        end
+        return "do\n  " .. table.concat(body, "\n  ") .. "\nend"
+    end
+
+    if t == "return" then
+        local vals = {}
+        for i, v in ipairs(expr.values or {}) do
+            vals[i] = Compiler.compile(v)
+        end
+        return "return " .. table.concat(vals, ", ")
+    end
+
+    if t == "break" then
+        return "break"
+    end
+
+    if t == "statement" then
+        return Compiler.compile(expr.inner)
     end
 
     return "<?>"
