@@ -33,11 +33,30 @@ function Sandbox.create()
     env.pairs  = Proxy.pairs
     env.ipairs = Proxy.ipairs
 
-    env.table = {
+    env.table = setmetatable({
         new = function(...)
             return Proxy.table({...})
         end
-    }
+    }, {
+        __index = function(_, key)
+            return Proxy.new("table." .. key)
+        end
+    })
+
+    env.typeof = function(v)
+        Logger:add("typeof(" .. Proxy.stringify(v) .. ")")
+        return "Instance"
+    end
+
+    env.tonumber = function(v)
+        Logger:add("tonumber(" .. Proxy.stringify(v) .. ")")
+        return Proxy.new("tonumber(" .. Proxy.stringify(v) .. ")")
+    end
+
+    env.tostring = function(v)
+        Logger:add("tostring(" .. Proxy.stringify(v) .. ")")
+        return Proxy.stringify(v)
+    end
 
     setmetatable(env, {
         __index = function(_, key)
