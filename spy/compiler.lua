@@ -184,6 +184,37 @@ function Compiler.compile(expr)
         return "break"
     end
 
+    if t == "goto" then
+        return "goto " .. expr.label
+    end
+
+    if t == "label" then
+        return "::" .. expr.name .. "::"
+    end
+
+    if t == "function" then
+        local params = table.concat(expr.params or {}, ", ")
+        local body = {}
+        for i, s in ipairs(expr.body or {}) do
+            body[i] = Compiler.compile(s)
+        end
+        local name = expr.name and (" " .. expr.name) or ""
+        return "function" .. name .. "(" .. params .. ")\n  "
+            .. table.concat(body, "\n  ") .. "\nend"
+    end
+
+    if t == "local" then
+        local names = table.concat(expr.names or {}, ", ")
+        local values = {}
+        for i, v in ipairs(expr.values or {}) do
+            values[i] = Compiler.compile(v)
+        end
+        if #values > 0 then
+            return "local " .. names .. " = " .. table.concat(values, ", ")
+        end
+        return "local " .. names
+    end
+
     if t == "statement" then
         return Compiler.compile(expr.inner)
     end
