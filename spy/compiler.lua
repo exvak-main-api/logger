@@ -10,8 +10,10 @@ local function stringify(value)
     local t = type(value)
     if t == "string" then
         return string.format("%q", value)
-    elseif t == "number" or t == "boolean" or t == "nil" then
+    elseif t == "number" or t == "boolean" then
         return tostring(value)
+    elseif t == "nil" then
+        return "nil"
     end
     return tostring(value)
 end
@@ -25,17 +27,19 @@ function Compiler.compile(expr)
         return locals[expr]
     end
 
-    if expr.type == "global" then
+    local t = expr.type
+
+    if t == "global" then
         return expr.name
     end
 
-    if expr.type == "literal" then
+    if t == "literal" then
         return stringify(expr.value)
     end
 
-    if expr.type == "index" then
+    if t == "index" then
         local base = Compiler.compile(expr.base)
-        local key = expr.key
+        local key  = expr.key
 
         if isIdentifier(key) then
             return base .. "." .. key
@@ -44,7 +48,7 @@ function Compiler.compile(expr)
         end
     end
 
-    if expr.type == "method" then
+    if t == "method" then
         local args = {}
         for i, v in ipairs(expr.args or {}) do
             args[i] = Compiler.compile(v)
@@ -57,7 +61,7 @@ function Compiler.compile(expr)
             .. ")"
     end
 
-    if expr.type == "call" then
+    if t == "call" then
         local args = {}
         for i, v in ipairs(expr.args or {}) do
             args[i] = Compiler.compile(v)
@@ -68,13 +72,13 @@ function Compiler.compile(expr)
             .. ")"
     end
 
-    if expr.type == "assign" then
+    if t == "assign" then
         return Compiler.compile(expr.target)
             .. " = "
             .. Compiler.compile(expr.value)
     end
 
-    if expr.type == "binary" then
+    if t == "binary" then
         return "("
             .. Compiler.compile(expr.left)
             .. " "
@@ -84,12 +88,16 @@ function Compiler.compile(expr)
             .. ")"
     end
 
-    if expr.type == "unary" then
-        return expr.op .. Compiler.compile(expr.operand)
+    if t == "unary" then
+        return "(" .. expr.op .. Compiler.compile(expr.operand) .. ")"
     end
 
-    if expr.type == "len" then
-        return "#" .. Compiler.compile(expr.operand)
+    if t == "len" then
+        return "#(" .. Compiler.compile(expr.operand) .. ")"
+    end
+
+    if t == "paren" then
+        return "(" .. Compiler.compile(expr.inner) .. ")"
     end
 
     return "<?>"
