@@ -2,15 +2,7 @@ local Logger = require("./logger")
 
 local Proxy = {}
 
-local paths = setmetatable({}, {
-    __mode = "k"
-})
-
 local function stringify(value)
-    if paths[value] then
-        return paths[value]
-    end
-
     if type(value) == "string" then
         return string.format("%q", value)
     end
@@ -18,75 +10,100 @@ local function stringify(value)
     return tostring(value)
 end
 
+local mt
+
+mt = {
+    __index = function(self, key)
+        local base = Expr.get(self)
+
+        local expr = {
+            type = "index",
+            base = base,
+            key = tostring(key)
+        }
+
+        local new = {}
+
+        Expr.set(new, expr)
+
+        return setmetatable(new, mt)
+    end,
+
+    __newindex = function(self, key, value)
+        local base = Expr.get(self)
+        local expression =
+            (base.name or tostring(base))
+            .. "["
+            .. stringify(key)
+            .. "] = "
+            .. stringify(value)
+
+        Logger:add("WRITE", expression)
+    end,
+
+    __call = function(self, ...)
+        local expr = Expr.get(self)
+
+        if expr.type == "index" then
+            local args = {}
+
+            for i, v in ipairs({...}) do
+                args[i] = {
+                    type = "literal",
+                    value = v
+                }
+            end
+
+            local newExpr = {
+                type = "method",
+                base = expr.base,
+                name = expr.key,
+                args = args
+            }
+
+            Logger:add(
+                "CALL",
+                Compiler.compile(newExpr)
+            )
+
+            local proxy = {}
+
+            Expr.set(proxy, newExpr)
+
+            return setmetatable(proxy, mt)
+        end
+    end,
+
+    __tostring = function(self)
+        local expr = Expr.get(self)
+        return expr.name or tostring(expr)
+    end,
+
+    __concat = function(a, b)
+        local expression =
+            stringify(a) .. " .. " .. stringify(b)
+
+        Logger:add("CONCAT", expression)
+
+        local proxy = {}
+        Expr.set(proxy, {
+            type = "global",
+            name = "(" .. expression .. ")"
+        })
+
+        return setmetatable(proxy, mt)
+    end,
+}
+
 local function makeProxy(path)
     local object = {}
 
-    Expr.set(obj,{
-            type="global",
-            name=path
-        })
-
-    return setmetatable(object, {
-        __index = function(_, key)
-            local expression
-
-            if type(key) == "string"
-                and key:match("^[%a_][%w_]*$") then
-
-                expression = path .. "." .. key
-            else
-                expression =
-                    path .. "[" .. stringify(key) .. "]"
-            end
-
-            Logger:add("INDEX", expression)
-
-            return makeProxy(expression)
-        end,
-
-        __newindex = function(_, key, value)
-            local expression =
-                path
-                .. "["
-                .. stringify(key)
-                .. "] = "
-                .. stringify(value)
-
-            Logger:add("WRITE", expression)
-        end,
-
-        __call = function(_, ...)
-            local args = table.pack(...)
-            local output = {}
-
-            for i = 1, args.n do
-                output[i] = stringify(args[i])
-            end
-
-            local expression =
-                path
-                .. "("
-                .. table.concat(output, ", ")
-                .. ")"
-
-            Logger:add("CALL", expression)
-
-            return makeProxy(expression)
-        end,
-
-        __tostring = function()
-            return path
-        end,
-
-        __concat = function(a, b)
-            local expression =
-                stringify(a) .. " .. " .. stringify(b)
-
-            Logger:add("CONCAT", expression)
-
-            return makeProxy("(" .. expression .. ")")
-        end,
+    Expr.set(object, {
+        type = "global",
+        name = path
     })
+
+    return setmetatable(object, mt)
 end
 
 Proxy.new = makeProxy
