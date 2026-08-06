@@ -215,6 +215,22 @@ function Compiler.compile(expr)
         return "local " .. names
     end
 
+    if t == "vararg" then
+        return "..."
+    end
+
+    if t == "and" then
+        return "(" .. Compiler.compile(expr.left) .. " and " .. Compiler.compile(expr.right) .. ")"
+    end
+
+    if t == "or" then
+        return "(" .. Compiler.compile(expr.left) .. " or " .. Compiler.compile(expr.right) .. ")"
+    end
+
+    if t == "not" then
+        return "(not " .. Compiler.compile(expr.operand) .. ")"
+    end
+
     if t == "statement" then
         return Compiler.compile(expr.inner)
     end
