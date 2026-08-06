@@ -67,7 +67,6 @@ mt = {
         local newExpr
 
         if expr.type == "index" then
-            -- method call: base:name(...)
             newExpr = {
                 type = "method",
                 base = expr.base,
@@ -75,7 +74,6 @@ mt = {
                 args = args
             }
         else
-            -- normal call: base(...)
             newExpr = {
                 type = "call",
                 base = expr,
@@ -151,7 +149,6 @@ end
 
 Proxy.new = makeProxy
 
--- keep a public stringify helper for sandbox
 function Proxy.stringify(value)
     local e = Expr.get(value)
     if e then
