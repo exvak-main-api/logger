@@ -68,6 +68,7 @@ def find_lune() -> str:
         Path.home() / ".lune" / "bin" / "lune",
         Path("/usr/local/bin/lune"),
         Path("/usr/bin/lune"),
+        Path("/home/container/lune"),
     ]:
         try:
             if c.is_file() and os.access(c, os.X_OK):
