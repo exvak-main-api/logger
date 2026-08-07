@@ -1,4 +1,4 @@
-"""Discord bot for logger/spy. Command .l — works on Pydroid 3 without Lune."""
+"""Discord bot for logger/spy. Command .l — works on Wispbyte / Pydroid without Lune."""
 
 from __future__ import annotations
 
@@ -13,7 +13,35 @@ from pathlib import Path
 import aiohttp
 import discord
 
-TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
+
+def _load_token() -> str:
+    for key in ("DISCORD_BOT_TOKEN", "BOT_TOKEN", "TOKEN", "DISCORD_TOKEN"):
+        v = os.environ.get(key, "").strip()
+        if v:
+            return v
+    for env_path in (
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path("/home/container/.env"),
+        Path.cwd() / ".env",
+    ):
+        try:
+            if not env_path.is_file():
+                continue
+            for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, val = line.partition("=")
+                k, val = k.strip(), val.strip().strip('"').strip("'")
+                if k in ("DISCORD_BOT_TOKEN", "BOT_TOKEN", "TOKEN", "DISCORD_TOKEN") and val:
+                    return val
+        except OSError:
+            pass
+    return ""
+
+
+TOKEN = _load_token()
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_PREVIEW = 1800
 LUNE_TIMEOUT = 25
@@ -40,7 +68,6 @@ def find_lune() -> str:
         Path.home() / ".lune" / "bin" / "lune",
         Path("/usr/local/bin/lune"),
         Path("/usr/bin/lune"),
-        Path("/home/workdir/bin/lune"),
     ]:
         try:
             if c.is_file() and os.access(c, os.X_OK):
@@ -232,7 +259,7 @@ async def on_ready():
     print(f"HAS_LUNE={HAS_LUNE} bin={LUNE_BIN}")
     print(f"py_runner exists={PY_RUNNER.is_file()}")
     if not HAS_LUNE:
-        print("Using pure-Python fallback (Pydroid / no Lune)")
+        print("Using pure-Python fallback (Wispbyte / no Lune)")
 
 
 @client.event
@@ -253,6 +280,10 @@ async def on_message(msg: discord.Message):
 def main():
     if not TOKEN:
         print("Set DISCORD_BOT_TOKEN first")
+        print("Checked env: DISCORD_BOT_TOKEN, BOT_TOKEN, TOKEN, DISCORD_TOKEN")
+        print("Also checked .env next to bot / /home/container/.env")
+        print("On Wispbyte: create file .env with one line:")
+        print("  DISCORD_BOT_TOKEN=your_token_here")
         raise SystemExit(1)
     client.run(TOKEN)
 
