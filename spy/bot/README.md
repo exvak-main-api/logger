@@ -1,14 +1,25 @@
-# Discord bot — `.l` reconstruction
+# Discord bot — `.l` / `.la` reconstruction
 
-Runs attached / pasted / linked Lua through the tracer and returns reconstructed source.
+Runs attached / pasted / linked Lua through the tracer or Aspect and returns reconstructed source.
+
+## Commands
+
+| Command | Backend |
+|---------|---------|
+| `.l` | Tracer (Lune sandbox) → pure-Python fallback if no Lune |
+| `.la` | Aspect full dumper (requires Lune) |
+
+Both accept a file attachment, ``` code block, raw link, or a reply to a message that has one of those.
 
 ## Pydroid 3 (Android)
 
-Lune does **not** run on Pydroid. The bot automatically uses a **pure-Python fallback** (`py_runner.py`) that:
+Lune does **not** run on Pydroid. The bot automatically uses a **pure-Python fallback** (`py_runner.py`) for `.l` that:
 
 - extracts `loadstring` / `load` bodies  
 - finds URLs and common Roblox/executor API calls  
 - normalizes the original source for reading  
+
+`.la` (Aspect) is unavailable without Lune.
 
 ### Setup on Pydroid 3
 
@@ -34,12 +45,11 @@ runpy.run_path("bot/discord_bot.py", run_name="__main__")
 ```
 
 4. Enable **Message Content Intent** in the Discord Developer Portal for your bot.
-5. Run the launcher. On start you should see:
-   `Lune missing — using pure-Python reconstruction fallback`
+5. Run the launcher. On start you should see a note about the Python fallback.
 
 Then in Discord use `.l` with a file, code block, or link.
 
-## PC / VPS (full Lune tracer)
+## PC / VPS (full Lune + Aspect)
 
 ```bash
 # Install Lune: https://github.com/lune-org/lune
@@ -48,7 +58,11 @@ export DISCORD_BOT_TOKEN=your_token
 python discord_bot.py
 ```
 
-With Lune installed you get live sandbox tracing; without it the Python fallback still runs.
+With Lune installed:
+- `.l` → live tracer sandbox
+- `.la` → Aspect dump (needs `core/io/apidump.json` relative to the working dir when Aspect loads)
+
+Without Lune, `.l` still works via the Python fallback; `.la` will report that Aspect needs Lune.
 
 ## Optional env vars
 
@@ -56,11 +70,3 @@ With Lune installed you get live sandbox tracing; without it the Python fallback
 |----------|---------|
 | `DISCORD_BOT_TOKEN` | Bot token (required) |
 | `LUNE_PATH` | Full path to `lune` binary if not on PATH |
-
-## Usage
-
-```
-.l
-```
-
-+ attachment, code block, raw link, or reply to a message that has one.
