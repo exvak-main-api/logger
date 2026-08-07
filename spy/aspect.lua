@@ -1,4 +1,4 @@
--- ts a file that came from discord.gg/tbjBPTRnph & @feariosz0
+
 
 if getfenv and type(getfenv) == "function" then
     local env = getfenv()
