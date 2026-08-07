@@ -1,11 +1,20 @@
 """
-Pure-Python reconstruction fallback for environments without Lune (e.g. Pydroid 3).
+Pure-Python reconstruction fallback for environments without Lune.
+Output is clean: OSE header + reconstructed bodies only (no original source dump).
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+
+OSE_HEADER = (
+    "-- [[\n"
+    "this file was constructed by OSE env logger\n"
+    "@ discord.gg/uEWVqpnyf2\n"
+    "]] --\n"
+    "\n"
+)
 
 
 def _decode_lua_string(s: str) -> str:
@@ -64,18 +73,6 @@ def extract_loadstring_calls(src: str) -> list[str]:
     return bodies
 
 
-def extract_http_urls(src: str) -> list[str]:
-    urls = re.findall(r"https?://[^\s'\"\\\]\)]+", src)
-    seen = set()
-    out = []
-    for u in urls:
-        u = re.sub(r"[.,;]+$", "", u)
-        if u not in seen:
-            seen.add(u)
-            out.append(u)
-    return out
-
-
 def extract_game_api_calls(src: str) -> list[str]:
     patterns = [
         r"game:GetService\s*\(\s*['\"][^'\"]+['\"]\s*\)",
@@ -99,70 +96,42 @@ def simple_beautify(src: str) -> str:
     src = src.replace("\r\n", "\n").replace("\r", "\n")
     src = re.sub(r"\n{3,}", "\n\n", src)
     src = re.sub(r";(?=\S)", ";\n", src)
-    return src.strip() + "\n"
+    return src.strip()
 
 
 def reconstruct(source: str) -> str:
-    lines: list[str] = []
-    lines.append("-- reconstructed by logger/spy (Python fallback \u2014 no Lune)")
-    lines.append("-- note: static heuristic dump; not full VM execution")
-    lines.append("")
+    parts: list[str] = []
 
     load_bodies = extract_loadstring_calls(source)
     long_strs = extract_long_strings(source)
-    urls = extract_http_urls(source)
     api_calls = extract_game_api_calls(source)
 
-    if urls:
-        lines.append("-- === URLs found ===")
-        for u in urls[:50]:
-            lines.append(f"-- {u}")
-        lines.append("")
-
     if api_calls:
-        lines.append("-- === notable API / path calls ===")
-        for c in api_calls[:100]:
-            lines.append(c)
-        lines.append("")
+        for c in api_calls[:200]:
+            parts.append(c)
 
     if load_bodies:
-        lines.append("-- === loadstring / load bodies ===")
-        for i, body in enumerate(load_bodies, 1):
-            lines.append(f"-- --- load body #{i} ({len(body)} bytes) ---")
-            nested = extract_loadstring_calls(body)
+        for body in load_bodies:
             pretty = simple_beautify(body)
-            if len(pretty) > 100_000:
-                lines.append(pretty[:100_000])
-                lines.append(f"-- ... truncated ({len(pretty)} total chars)")
-            else:
-                lines.append(pretty)
-            if nested:
-                lines.append(f"-- (nested loadstring count: {len(nested)})")
-                for j, nb in enumerate(nested[:5], 1):
-                    lines.append(f"-- nested #{j}:")
-                    lines.append(simple_beautify(nb)[:20000])
-            lines.append("")
+            if len(pretty) > 200_000:
+                pretty = pretty[:200_000]
+            parts.append(pretty)
+            for nb in extract_loadstring_calls(body)[:8]:
+                nested = simple_beautify(nb)
+                if nested:
+                    parts.append(nested[:50000])
 
-    code_like = []
-    for s in long_strs:
-        if any(k in s for k in ("function", "local ", "return", "game", "getgenv", "loadstring")):
-            code_like.append(s)
-    if code_like and not load_bodies:
-        lines.append("-- === long strings that look like code ===")
-        for i, body in enumerate(code_like[:10], 1):
-            lines.append(f"-- --- long string #{i} ---")
-            lines.append(simple_beautify(body)[:50000])
-            lines.append("")
+    if not load_bodies:
+        for s in long_strs:
+            if any(k in s for k in ("function", "local ", "return", "game", "getgenv", "loadstring")):
+                parts.append(simple_beautify(s)[:80000])
 
-    lines.append("-- === original source (normalized) ===")
-    cleaned = simple_beautify(source)
-    if len(cleaned) > 150_000:
-        lines.append(cleaned[:150_000])
-        lines.append(f"-- ... truncated original ({len(cleaned)} chars)")
-    else:
-        lines.append(cleaned)
+    # If nothing useful extracted, emit normalized source as last resort (still no banners)
+    if not parts:
+        parts.append(simple_beautify(source))
 
-    return "\n".join(lines)
+    core = "\n\n".join(p for p in parts if p).strip()
+    return OSE_HEADER + core + "\n"
 
 
 def reconstruct_file(input_path: str | Path, output_path: str | Path) -> str:
