@@ -1,7 +1,6 @@
--- spy/proxy.luau
-local Logger = require("@self/logger")
-local Expr = require("@self/expr")
-local Compiler = require("@self/compiler")
+local Logger = require("./logger")
+local Expr = require("./expr")
+local Compiler = require("./compiler")
 
 local Proxy = {}
 local mt
@@ -85,9 +84,18 @@ mt = {
 
 	__call = function(self, ...)
 		local expr = Expr.get(self)
+		local packed = { ... }
 		local args = {}
-		for i, v in { ... } do
-			args[i] = toExpr(v)
+		local start = 1
+
+		-- Colon-call sugar passes the original object as the first argument.
+		-- For method reconstruction we skip it.
+		if expr.type == "index" and #packed >= 1 then
+			start = 2
+		end
+
+		for i = start, #packed do
+			table.insert(args, toExpr(packed[i]))
 		end
 
 		local newExpr
@@ -123,66 +131,32 @@ mt = {
 	__len = function(self)
 		local expr = { type = "len", operand = Expr.get(self) }
 		Logger:add(Compiler.compile(expr))
-		local proxy = {}
-		Expr.set(proxy, expr)
-		return setmetatable(proxy, mt)
+		return 0
 	end,
 
 	__unm = function(self)
 		return makeUnary("-", self)
 	end,
 
-	__add = function(a, b)
-		return makeBinary("+", a, b)
-	end,
-	__sub = function(a, b)
-		return makeBinary("-", a, b)
-	end,
-	__mul = function(a, b)
-		return makeBinary("*", a, b)
-	end,
-	__div = function(a, b)
-		return makeBinary("/", a, b)
-	end,
-	__mod = function(a, b)
-		return makeBinary("%", a, b)
-	end,
-	__pow = function(a, b)
-		return makeBinary("^", a, b)
-	end,
-	__idiv = function(a, b)
-		return makeBinary("//", a, b)
-	end,
+	__add = function(a, b) return makeBinary("+", a, b) end,
+	__sub = function(a, b) return makeBinary("-", a, b) end,
+	__mul = function(a, b) return makeBinary("*", a, b) end,
+	__div = function(a, b) return makeBinary("/", a, b) end,
+	__mod = function(a, b) return makeBinary("%", a, b) end,
+	__pow = function(a, b) return makeBinary("^", a, b) end,
+	__idiv = function(a, b) return makeBinary("//", a, b) end,
 
-	__eq = function(a, b)
-		return makeBinary("==", a, b)
-	end,
-	__lt = function(a, b)
-		return makeBinary("<", a, b)
-	end,
-	__le = function(a, b)
-		return makeBinary("<=", a, b)
-	end,
+	__eq = function(a, b) return makeBinary("==", a, b) end,
+	__lt = function(a, b) return makeBinary("<", a, b) end,
+	__le = function(a, b) return makeBinary("<=", a, b) end,
 
-	__band = function(a, b)
-		return makeBinary("&", a, b)
-	end,
-	__bor = function(a, b)
-		return makeBinary("|", a, b)
-	end,
-	__bxor = function(a, b)
-		return makeBinary("~", a, b)
-	end,
-	__shl = function(a, b)
-		return makeBinary("<<", a, b)
-	end,
-	__shr = function(a, b)
-		return makeBinary(">>", a, b)
-	end,
+	__band = function(a, b) return makeBinary("&", a, b) end,
+	__bor = function(a, b) return makeBinary("|", a, b) end,
+	__bxor = function(a, b) return makeBinary("~", a, b) end,
+	__shl = function(a, b) return makeBinary("<<", a, b) end,
+	__shr = function(a, b) return makeBinary(">>", a, b) end,
 
-	__bnot = function(self)
-		return makeUnary("~", self)
-	end,
+	__bnot = function(self) return makeUnary("~", self) end,
 
 	__pairs = function(self)
 		local expr = { type = "pairs", operand = Expr.get(self) }
@@ -211,12 +185,8 @@ Proxy.new = makeProxy
 
 function Proxy.stringify(value: any): string
 	local e = Expr.get(value)
-	if e then
-		return Compiler.compile(e)
-	end
-	if type(value) == "string" then
-		return string.format("%q", value)
-	end
+	if e then return Compiler.compile(e) end
+	if type(value) == "string" then return string.format("%q", value) end
 	return tostring(value)
 end
 
@@ -370,14 +340,8 @@ function Proxy.local_(names: { string }, values: { any }?)
 	return expr
 end
 
-function Proxy.and_(a: any, b: any)
-	return makeLogic("and", a, b)
-end
-
-function Proxy.or_(a: any, b: any)
-	return makeLogic("or", a, b)
-end
-
+function Proxy.and_(a: any, b: any) return makeLogic("and", a, b) end
+function Proxy.or_(a: any, b: any) return makeLogic("or", a, b) end
 function Proxy.not_(a: any)
 	local expr = { type = "not", operand = toExpr(a) }
 	Logger:add(Compiler.compile(expr))
@@ -385,19 +349,9 @@ function Proxy.not_(a: any)
 	Expr.set(proxy, expr)
 	return setmetatable(proxy, mt)
 end
-
-function Proxy.neq(a: any, b: any)
-	return makeBinary("~=", a, b)
-end
-
-function Proxy.gt(a: any, b: any)
-	return makeBinary(">", a, b)
-end
-
-function Proxy.ge(a: any, b: any)
-	return makeBinary(">=", a, b)
-end
-
+function Proxy.neq(a: any, b: any) return makeBinary("~=", a, b) end
+function Proxy.gt(a: any, b: any) return makeBinary(">", a, b) end
+function Proxy.ge(a: any, b: any) return makeBinary(">=", a, b) end
 function Proxy.vararg()
 	local expr = { type = "vararg" }
 	local proxy = {}
