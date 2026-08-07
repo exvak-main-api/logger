@@ -1,37 +1,52 @@
 # logger / spy
 
-Expression-tree based Roblox/Luau tracer sandbox that reconstructs executed code for logging.
+Expression-tree based Roblox/Luau **tracer sandbox** that reconstructs executed code for logging and readable dumps.
 
-Inspired by UNC/sUNC surfaces and tools like [unveilr](https://github.com/bbbbbbbbbbbbbb121/thee-bot/tree/main/unveilr).
+Also includes a **Discord bot** with the `.l` command.
 
 ## Modules
 
-| File | Role |
+| Path | Role |
 |------|------|
-| `logger.luau` | Levelled logger, dump/filter helpers |
-| `expr.luau` | Weak-keyed expression storage |
-| `compiler.luau` | Expression tree → source reconstruction |
-| `proxy.luau` | Proxy objects + full operator overloading |
-| `sandbox.luau` | Full executor env (hooks, debug, fs, input, Drawing, syn.oth, …) |
-| `test.luau` | Lune test harness |
-| `init.luau` | Package entry |
+| `logger.luau` | Levelled logger + dump/filter |
+| `expr.luau` | Weak expression storage |
+| `compiler.luau` | Expression → source |
+| `proxy.luau` | Operator-overloading proxies |
+| `sandbox.luau` | Full executor API surface (UNC-style) |
+| `runner.luau` | CLI: run a script through the sandbox → reconstructed output |
+| `test.luau` | Lune smoke test |
+| `bot/discord_bot.py` | Discord bot (`.l` command) |
 
-## Run with Lune
+## Lune CLI
 
 ```bash
-lune run spy/test.luau
+# smoke test
+lune run test.luau
+
+# reconstruct a script
+lune run runner.luau path/to/script.lua dumps/out.lua
 ```
 
-## Coverage highlights
+## Discord bot (`.l`)
 
-- Environments: `getgenv`, `getrenv`, `getfenv`/`setfenv`, `getsenv`
-- Closures: `hookfunction`, `hookmetamethod`, `clonefunction`, `newcclosure`, `is*closure`, `restorefunction`
-- Metatable: `getrawmetatable`, `setrawmetatable`, `setreadonly`, `get/setnamecallmethod`
-- Instances: `gethui`, `cloneref`, `fire*`, hidden properties, `getcallbackvalue`
-- Scripts: bytecode/closure/hash, `getcallingscript`, `decompile`
-- Debug library (upvalues, constants, protos, stack)
-- Filesystem, clipboard, FPS, HWID, input simulation
-- `syn` / `oth` / `cache` / `crypt` / Drawing / WebSocket
-- Console (`rconsole*`), actors, signals, compression (lz4/zstd)
+```bash
+pip install -r bot/requirements.txt
+export DISCORD_BOT_TOKEN=your_token
+python bot/discord_bot.py
+```
 
-All calls are logged as reconstructed Lua source.
+Then in Discord:
+
+```
+.l
+```
+
+with a **file**, **``` code block**, or **raw link** (or reply to a message that has one).
+
+The bot runs the code through the tracer and replies with `reconstructed.lua`.
+
+See [bot/README.md](bot/README.md) for details.
+
+## Coverage (sandbox)
+
+Environments, closures/hooks, metatables, identity, instances/signals, scripts, filesystem, input, Drawing, crypt, syn/oth, cache, rconsole, debug.*, and common aliases from UNC/sUNC-style executors.
