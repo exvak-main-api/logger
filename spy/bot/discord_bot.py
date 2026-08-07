@@ -8,7 +8,7 @@ Command: .l
 Setup:
   1. pip install -U discord.py aiohttp
   2. export DISCORD_BOT_TOKEN=your_token
-  3. Ensure `lune` is on PATH
+  3. Install Lune and ensure it is on PATH (or set LUNE_PATH)
   4. python bot/discord_bot.py
 """
 
@@ -18,6 +18,7 @@ import asyncio
 import io
 import os
 import re
+import shutil
 import traceback
 from pathlib import Path
 
@@ -25,7 +26,6 @@ import aiohttp
 import discord
 
 TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
-COMMAND = "l"
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_PREVIEW = 1800
 LUNE_TIMEOUT = 25
@@ -38,6 +38,33 @@ RUNNER = ROOT / "runner.luau"
 
 ORIGINAL.mkdir(parents=True, exist_ok=True)
 DUMPED.mkdir(parents=True, exist_ok=True)
+
+
+def find_lune() -> str:
+    override = os.environ.get("LUNE_PATH")
+    if override and Path(override).is_file():
+        return override
+    which = shutil.which("lune")
+    if which:
+        return which
+    candidates = [
+        Path.home() / ".lune" / "bin" / "lune",
+        Path("/home/workdir/bin/lune"),
+        Path("/usr/local/bin/lune"),
+        Path("/usr/bin/lune"),
+        ROOT.parent / "bin" / "lune",
+        Path(__file__).resolve().parent.parent.parent / "bin" / "lune",
+    ]
+    for c in candidates:
+        try:
+            if c.is_file() and os.access(c, os.X_OK):
+                return str(c)
+        except OSError:
+            pass
+    return "lune"
+
+
+LUNE_BIN = find_lune()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -66,7 +93,7 @@ def extract_link(text: str) -> str | None:
     if not m:
         return None
     url = m.group(0)
-    url = re.sub(r'[\]\)\'"\>.,;]+$', "", url)
+    url = re.sub(r'[\]\)\'\"\>.,;]+$', "", url)
     return url
 
 
@@ -131,7 +158,7 @@ async def run_tracer(source: str, stem: str) -> tuple[bool, str, str]:
     out_path = DUMPED / f"{stem}_reconstructed.lua"
     in_path.write_text(source.replace("\r\n", "\n").replace("\r", "\n"), encoding="utf-8")
 
-    cmd = ["lune", "run", str(RUNNER), str(in_path), str(out_path)]
+    cmd = [LUNE_BIN, "run", str(RUNNER), str(in_path), str(out_path)]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -156,7 +183,7 @@ async def run_tracer(source: str, stem: str) -> tuple[bool, str, str]:
 
         return False, err_text or out_text or "runner produced no output", ""
     except FileNotFoundError:
-        return False, "lune not found on PATH — install Lune: https://github.com/lune-org/lune", ""
+        return False, f"lune not found (tried {LUNE_BIN}). Install: https://github.com/lune-org/lune — or set LUNE_PATH=/path/to/lune", ""
     except Exception as e:
         return False, f"runner error: {e}", ""
 
@@ -227,6 +254,7 @@ async def on_ready():
     print(f"logged in as {client.user} (id={client.user and client.user.id})")
     print(f"spy root: {ROOT}")
     print(f"runner: {RUNNER} exists={RUNNER.is_file()}")
+    print(f"lune: {LUNE_BIN} exists={Path(LUNE_BIN).is_file()}")
 
 
 @client.event
