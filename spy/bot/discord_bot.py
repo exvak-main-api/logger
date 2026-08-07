@@ -1,4 +1,4 @@
-"""Discord bot for logger/spy. Commands .l (tracer) and .la (Aspect)."""
+"""Discord bot for logger/spy. .l uses Aspect (Lune) → tracer → Python fallback."""
 
 from __future__ import annotations
 
@@ -15,7 +15,6 @@ import discord
 
 
 def _load_dotenv() -> dict[str, str]:
-    """Load KEY=VAL pairs from common .env locations."""
     found: dict[str, str] = {}
     for env_path in (
         Path(__file__).resolve().parent / ".env",
@@ -57,7 +56,7 @@ def _load_token() -> str:
 TOKEN = _load_token()
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_PREVIEW = 1800
-LUNE_TIMEOUT = 60  # Aspect can be slower
+LUNE_TIMEOUT = 90
 
 ROOT = Path(__file__).resolve().parent.parent
 DUMPS = ROOT / "dumps"
@@ -69,40 +68,41 @@ PY_RUNNER = Path(__file__).resolve().parent / "py_runner.py"
 ORIGINAL.mkdir(parents=True, exist_ok=True)
 DUMPED.mkdir(parents=True, exist_ok=True)
 
+OSE_HEADER = (
+    "-- [[\n"
+    "this file was constructed by OSE env logger\n"
+    "@ discord.gg/uEWVqpnyf2\n"
+    "]] --\n"
+    "\n"
+)
+
 
 def _is_usable_binary(path: Path) -> bool:
     try:
         if not path.is_file():
             return False
-        # Prefer executable, but still accept a plain file (some hosts strip +x)
         if os.access(path, os.X_OK):
             return True
-        # readable regular file — try it anyway
         return os.access(path, os.R_OK)
     except OSError:
         return False
 
 
 def find_lune() -> tuple[str, str]:
-    """Return (path, how_found)."""
-    # 1) explicit env / .env
     override = _env("LUNE_PATH")
     if override:
         p = Path(override).expanduser()
         if _is_usable_binary(p):
             return str(p.resolve()), "LUNE_PATH"
-        # maybe they pointed at a directory that contains the binary
         for child in ("lune", "bin/lune"):
             c = p / child
             if _is_usable_binary(c):
                 return str(c.resolve()), f"LUNE_PATH/{child}"
 
-    # 2) PATH
     which = shutil.which("lune")
     if which and _is_usable_binary(Path(which)):
         return which, "PATH"
 
-    # 3) common absolute locations (Wispbyte / Pterodactyl / local installs)
     candidates = [
         Path("/home/container/lune"),
         Path("/home/container/lune/bin/lune"),
@@ -204,6 +204,20 @@ async def get_source_from_message(msg: discord.Message) -> tuple[str | None, str
     return None, "no input (attach a .lua file, paste a code block, or include a link)"
 
 
+def ensure_ose_header(text: str) -> str:
+    """Guarantee OSE header is present once; strip other banners."""
+    if not text:
+        return OSE_HEADER + "-- (empty dump)\n"
+    body = text
+    # strip existing leading block comments / banners
+    body = re.sub(r"^\s*--\s*\[\[.*?\]\]\s*--?\s*", "", body, count=1, flags=re.DOTALL)
+    body = re.sub(r"^\s*--\[\[.*?\]\]\s*", "", body, count=1, flags=re.DOTALL)
+    body = body.lstrip("\n")
+    if body.startswith("-- [[") and "OSE env logger" in body[:200]:
+        return body if body.endswith("\n") else body + "\n"
+    return OSE_HEADER + body.rstrip() + "\n"
+
+
 async def run_tracer_python(source: str, stem: str) -> tuple[bool, str, str]:
     in_path = ORIGINAL / f"{stem}.lua"
     out_path = DUMPED / f"{stem}_reconstructed.lua"
@@ -217,20 +231,19 @@ async def run_tracer_python(source: str, stem: str) -> tuple[bool, str, str]:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         reconstructed = mod.reconstruct_file(in_path, out_path)
+        reconstructed = ensure_ose_header(reconstructed)
+        out_path.write_text(reconstructed, encoding="utf-8")
         return True, str(out_path), reconstructed
     except Exception as e:
         return False, f"python runner error: {e}", ""
 
 
-async def run_lune(source: str, stem: str, aspect: bool = False) -> tuple[bool, str, str]:
+async def run_lune_auto(source: str, stem: str) -> tuple[bool, str, str]:
+    """Runner auto mode: Aspect first, tracer fallback. No extra flags."""
     in_path = ORIGINAL / f"{stem}.lua"
-    suffix = "_aspect.lua" if aspect else "_reconstructed.lua"
-    out_path = DUMPED / f"{stem}{suffix}"
+    out_path = DUMPED / f"{stem}_reconstructed.lua"
     in_path.write_text(source.replace("\r\n", "\n").replace("\r", "\n"), encoding="utf-8")
-    cmd = [LUNE_BIN, "run", str(RUNNER)]
-    if aspect:
-        cmd.append("--aspect")
-    cmd.extend([str(in_path), str(out_path)])
+    cmd = [LUNE_BIN, "run", str(RUNNER), str(in_path), str(out_path)]
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=str(ROOT), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -243,6 +256,8 @@ async def run_lune(source: str, stem: str, aspect: bool = False) -> tuple[bool, 
             return False, "timeout", ""
         if out_path.is_file():
             reconstructed = out_path.read_text(encoding="utf-8", errors="replace")
+            reconstructed = ensure_ose_header(reconstructed)
+            out_path.write_text(reconstructed, encoding="utf-8")
             return True, str(out_path), reconstructed
         err = (stderr or stdout).decode("utf-8", errors="replace") or "no output"
         return False, err, ""
@@ -254,18 +269,14 @@ async def run_lune(source: str, stem: str, aspect: bool = False) -> tuple[bool, 
         return False, f"runner error: {e}", ""
 
 
-async def run_tracer(source: str, stem: str) -> tuple[bool, str, str]:
+async def run_reconstruct(source: str, stem: str) -> tuple[bool, str, str, str]:
+    """Returns ok, path_or_err, text, mode."""
     if HAS_LUNE:
-        ok, path, text = await run_lune(source, stem, aspect=False)
+        ok, path, text = await run_lune_auto(source, stem)
         if ok:
-            return ok, path, text
-    return await run_tracer_python(source, stem)
-
-
-async def run_aspect(source: str, stem: str) -> tuple[bool, str, str]:
-    if not HAS_LUNE:
-        return False, "Aspect requires Lune (not available on this host)", ""
-    return await run_lune(source, stem, aspect=True)
+            return True, path, text, "aspect/auto"
+    ok, path, text = await run_tracer_python(source, stem)
+    return ok, path, text, "python-fallback"
 
 
 def make_discord_file(text: str, filename: str) -> discord.File:
@@ -274,7 +285,7 @@ def make_discord_file(text: str, filename: str) -> discord.File:
     return discord.File(buf, filename=filename)
 
 
-async def handle_reconstruct(msg: discord.Message, *, aspect: bool):
+async def handle_l(msg: discord.Message):
     now = asyncio.get_event_loop().time()
     last = _cooldowns.get(msg.author.id, 0)
     if now - last < COOLDOWN_S:
@@ -285,9 +296,8 @@ async def handle_reconstruct(msg: discord.Message, *, aspect: bool):
     async with msg.channel.typing():
         source, origin = await get_source_from_message(msg)
         if not source:
-            cmd = ".la" if aspect else ".l"
             await msg.reply(
-                f"**`{cmd}`** — reconstruct Lua\n"
+                "**`.l`** — reconstruct Lua (Aspect → tracer → python)\n"
                 "• file attachment\n• ``` code block\n• raw link\n• reply to a message with any of those\n\n"
                 f"_{origin}_"
             )
@@ -297,14 +307,7 @@ async def handle_reconstruct(msg: discord.Message, *, aspect: bool):
             return
 
         stem = f"{msg.author.id}_{msg.id}"
-        if aspect:
-            ok, path_or_err, reconstructed = await run_aspect(source, stem)
-            mode = "aspect"
-            filename = "aspect_dump.lua"
-        else:
-            ok, path_or_err, reconstructed = await run_tracer(source, stem)
-            mode = "lune" if HAS_LUNE else "python-fallback"
-            filename = "reconstructed.lua"
+        ok, path_or_err, reconstructed, mode = await run_reconstruct(source, stem)
 
         if not ok and not reconstructed:
             await msg.reply(f"reconstruction failed:\n```diff\n- {(path_or_err or 'error')[:500]}\n```")
@@ -312,14 +315,14 @@ async def handle_reconstruct(msg: discord.Message, *, aspect: bool):
         if not reconstructed and Path(path_or_err).is_file():
             reconstructed = Path(path_or_err).read_text(encoding="utf-8", errors="replace")
 
-        header = (
-            f"reconstructed for {msg.author.mention} ({mode})\n"
-            f"origin: `{origin}` · {len(source)} → {len(reconstructed)} chars"
-        )
+        reconstructed = ensure_ose_header(reconstructed)
+
+        # Discord message is just the file — no extra banners in the file itself
+        note = f"done for {msg.author.mention} · `{mode}` · {len(source)} → {len(reconstructed)} chars"
         try:
-            await msg.reply(header, file=make_discord_file(reconstructed, filename))
+            await msg.reply(note, file=make_discord_file(reconstructed, "reconstructed.lua"))
         except discord.HTTPException:
-            await msg.reply(header + "\n```lua\n" + reconstructed[:MAX_OUTPUT_PREVIEW] + "\n```")
+            await msg.reply(note + "\n```lua\n" + reconstructed[:MAX_OUTPUT_PREVIEW] + "\n```")
 
 
 @client.event
@@ -329,9 +332,8 @@ async def on_ready():
     print(f"py_runner exists={PY_RUNNER.is_file()}")
     print(f"ROOT={ROOT}")
     if not HAS_LUNE:
-        print("Using pure-Python fallback for .l (Aspect / .la unavailable without Lune)")
-        print("Hint: set LUNE_PATH=/home/container/lune in .env or env, and chmod +x that file")
-        # quick diagnostic
+        print("Using pure-Python fallback for .l")
+        print("Hint: set LUNE_PATH=/home/container/lune in .env and chmod +x that file")
         for p in (
             "/home/container/lune",
             "/home/container/lune/bin/lune",
@@ -346,17 +348,16 @@ async def on_message(msg: discord.Message):
     if msg.author.bot:
         return
     content = (msg.content or "").strip()
-    try:
-        if re.match(r"^\.la(\s|$)", content, re.IGNORECASE):
-            await handle_reconstruct(msg, aspect=True)
-        elif re.match(r"^\.l(\s|$)", content, re.IGNORECASE):
-            await handle_reconstruct(msg, aspect=False)
-    except Exception:
-        traceback.print_exc()
+    # .l and .la both go through the same pipeline (Aspect-first)
+    if re.match(r"^\.la?(\s|$)", content, re.IGNORECASE):
         try:
-            await msg.reply("internal error — check bot logs")
+            await handle_l(msg)
         except Exception:
-            pass
+            traceback.print_exc()
+            try:
+                await msg.reply("internal error — check bot logs")
+            except Exception:
+                pass
 
 
 def main():
@@ -364,8 +365,6 @@ def main():
         print("Set DISCORD_BOT_TOKEN first")
         print("Checked env: DISCORD_BOT_TOKEN, BOT_TOKEN, TOKEN, DISCORD_TOKEN")
         print("Also checked .env next to bot / /home/container/.env")
-        print("On Wispbyte: create file .env with one line:")
-        print("  DISCORD_BOT_TOKEN=your_token_here")
         raise SystemExit(1)
     client.run(TOKEN)
 
