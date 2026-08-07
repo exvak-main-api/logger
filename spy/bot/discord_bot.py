@@ -14,11 +14,9 @@ import aiohttp
 import discord
 
 
-def _load_token() -> str:
-    for key in ("DISCORD_BOT_TOKEN", "BOT_TOKEN", "TOKEN", "DISCORD_TOKEN"):
-        v = os.environ.get(key, "").strip()
-        if v:
-            return v
+def _load_dotenv() -> dict[str, str]:
+    """Load KEY=VAL pairs from common .env locations."""
+    found: dict[str, str] = {}
     for env_path in (
         Path(__file__).resolve().parent / ".env",
         Path(__file__).resolve().parent.parent / ".env",
@@ -34,10 +32,25 @@ def _load_token() -> str:
                     continue
                 k, _, val = line.partition("=")
                 k, val = k.strip(), val.strip().strip('"').strip("'")
-                if k in ("DISCORD_BOT_TOKEN", "BOT_TOKEN", "TOKEN", "DISCORD_TOKEN") and val:
-                    return val
+                if k and val and k not in found:
+                    found[k] = val
         except OSError:
             pass
+    return found
+
+
+_DOTENV = _load_dotenv()
+
+
+def _env(key: str, default: str = "") -> str:
+    return (os.environ.get(key) or _DOTENV.get(key) or default).strip()
+
+
+def _load_token() -> str:
+    for key in ("DISCORD_BOT_TOKEN", "BOT_TOKEN", "TOKEN", "DISCORD_TOKEN"):
+        v = _env(key)
+        if v:
+            return v
     return ""
 
 
@@ -57,30 +70,61 @@ ORIGINAL.mkdir(parents=True, exist_ok=True)
 DUMPED.mkdir(parents=True, exist_ok=True)
 
 
-def find_lune() -> str:
-    override = os.environ.get("LUNE_PATH")
-    if override and Path(override).is_file():
-        return override
+def _is_usable_binary(path: Path) -> bool:
+    try:
+        if not path.is_file():
+            return False
+        # Prefer executable, but still accept a plain file (some hosts strip +x)
+        if os.access(path, os.X_OK):
+            return True
+        # readable regular file — try it anyway
+        return os.access(path, os.R_OK)
+    except OSError:
+        return False
+
+
+def find_lune() -> tuple[str, str]:
+    """Return (path, how_found)."""
+    # 1) explicit env / .env
+    override = _env("LUNE_PATH")
+    if override:
+        p = Path(override).expanduser()
+        if _is_usable_binary(p):
+            return str(p.resolve()), "LUNE_PATH"
+        # maybe they pointed at a directory that contains the binary
+        for child in ("lune", "bin/lune"):
+            c = p / child
+            if _is_usable_binary(c):
+                return str(c.resolve()), f"LUNE_PATH/{child}"
+
+    # 2) PATH
     which = shutil.which("lune")
-    if which:
-        return which
-    for c in [
+    if which and _is_usable_binary(Path(which)):
+        return which, "PATH"
+
+    # 3) common absolute locations (Wispbyte / Pterodactyl / local installs)
+    candidates = [
+        Path("/home/container/lune"),
+        Path("/home/container/lune/bin/lune"),
+        Path("/home/container/.lune/bin/lune"),
+        Path("/home/container/bin/lune"),
         Path.home() / ".lune" / "bin" / "lune",
+        Path.home() / "lune",
         Path("/usr/local/bin/lune"),
         Path("/usr/bin/lune"),
-        Path("/home/container/lune"),
-    ]:
-        try:
-            if c.is_file() and os.access(c, os.X_OK):
-                return str(c)
-        except OSError:
-            pass
-    return "lune"
+        ROOT / "lune",
+        Path.cwd() / "lune",
+    ]
+    for c in candidates:
+        if _is_usable_binary(c):
+            return str(c.resolve()), str(c)
+
+    return "lune", "fallback-string"
 
 
-LUNE_BIN = find_lune()
+LUNE_BIN, LUNE_SOURCE = find_lune()
 try:
-    HAS_LUNE = Path(LUNE_BIN).is_file() and os.access(LUNE_BIN, os.X_OK)
+    HAS_LUNE = _is_usable_binary(Path(LUNE_BIN))
 except OSError:
     HAS_LUNE = False
 
@@ -204,6 +248,8 @@ async def run_lune(source: str, stem: str, aspect: bool = False) -> tuple[bool, 
         return False, err, ""
     except FileNotFoundError:
         return False, f"lune not found ({LUNE_BIN})", ""
+    except PermissionError:
+        return False, f"lune not executable ({LUNE_BIN}) — try: chmod +x {LUNE_BIN}", ""
     except Exception as e:
         return False, f"runner error: {e}", ""
 
@@ -279,10 +325,20 @@ async def handle_reconstruct(msg: discord.Message, *, aspect: bool):
 @client.event
 async def on_ready():
     print(f"logged in as {client.user}")
-    print(f"HAS_LUNE={HAS_LUNE} bin={LUNE_BIN}")
+    print(f"HAS_LUNE={HAS_LUNE} bin={LUNE_BIN} (via {LUNE_SOURCE})")
     print(f"py_runner exists={PY_RUNNER.is_file()}")
+    print(f"ROOT={ROOT}")
     if not HAS_LUNE:
         print("Using pure-Python fallback for .l (Aspect / .la unavailable without Lune)")
+        print("Hint: set LUNE_PATH=/home/container/lune in .env or env, and chmod +x that file")
+        # quick diagnostic
+        for p in (
+            "/home/container/lune",
+            "/home/container/lune/bin/lune",
+            "/home/container/.lune/bin/lune",
+        ):
+            pp = Path(p)
+            print(f"  check {p}: exists={pp.exists()} is_file={pp.is_file() if pp.exists() else False}")
 
 
 @client.event
