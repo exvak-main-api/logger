@@ -1,54 +1,66 @@
 # Discord bot — `.l` reconstruction
 
-Runs attached / pasted / linked Lua through the **logger/spy** tracer sandbox and returns reconstructed, readable call logs (expressions, method calls, assignments).
+Runs attached / pasted / linked Lua through the tracer and returns reconstructed source.
 
-## Setup
+## Pydroid 3 (Android)
 
-```bash
-# 1. Install Lune (https://github.com/lune-org/lune)
-# 2. Python deps
-pip install -r bot/requirements.txt
+Lune does **not** run on Pydroid. The bot automatically uses a **pure-Python fallback** (`py_runner.py`) that:
 
-# 3. Discord bot token (from https://discord.com/developers/applications)
-export DISCORD_BOT_TOKEN="your_token_here"
+- extracts `loadstring` / `load` bodies  
+- finds URLs and common Roblox/executor API calls  
+- normalizes the original source for reading  
 
-# 4. Enable MESSAGE CONTENT intent in the Discord developer portal
+### Setup on Pydroid 3
 
-# 5. Run from the spy/ directory (or any cwd; paths are absolute to spy/)
-cd spy
-python bot/discord_bot.py
+1. Install packages in Pydroid (Pip):
+   - `discord.py`
+   - `aiohttp`
+2. Copy the whole `spy/` folder onto the device (or clone the repo).
+3. In Pydroid terminal / script:
+
+```python
+import os
+os.environ["DISCORD_BOT_TOKEN"] = "your_bot_token_here"
+# then run:
+#  exec(open("bot/discord_bot.py").read())
 ```
 
-## Usage
+Or create a small launcher:
 
-In Discord:
+```python
+import os, runpy
+os.environ["DISCORD_BOT_TOKEN"] = "YOUR_TOKEN"
+runpy.run_path("bot/discord_bot.py", run_name="__main__")
+```
+
+4. Enable **Message Content Intent** in the Discord Developer Portal for your bot.
+5. Run the launcher. On start you should see:
+   `Lune missing — using pure-Python reconstruction fallback`
+
+Then in Discord use `.l` with a file, code block, or link.
+
+## PC / VPS (full Lune tracer)
+
+```bash
+# Install Lune: https://github.com/lune-org/lune
+pip install -r requirements.txt
+export DISCORD_BOT_TOKEN=your_token
+python discord_bot.py
+```
+
+With Lune installed you get live sandbox tracing; without it the Python fallback still runs.
+
+## Optional env vars
+
+| Variable | Meaning |
+|----------|---------|
+| `DISCORD_BOT_TOKEN` | Bot token (required) |
+| `LUNE_PATH` | Full path to `lune` binary if not on PATH |
+
+## Usage
 
 ```
 .l
 ```
 
-with one of:
-
-| Input | Example |
-|-------|---------|
-| File attachment | `.l` + upload `script.lua` |
-| Code block | `.l` then \`\`\`lua … \`\`\` |
-| Link | `.l https://pastebin.com/raw/…` |
-| Reply | Reply to a message that has any of the above, then `.l` |
-
-The bot replies with `reconstructed.lua` — traced expressions rebuilt as source (prints, hooks, index chains, assignments, etc.).
-
-## How it works
-
-1. Extracts source from attachment / code block / URL  
-2. Writes it under `dumps/original/`  
-3. Runs `lune run runner.luau <input> <output>`  
-4. Sandbox proxies log every operation via the expression compiler  
-5. Sends `dumps/dumped/*_reconstructed.lua` back as a file  
-
-## Notes
-
-- Timeout: 25s (guards infinite loops)  
-- Max input: 2 MB  
-- Cooldown: 5s per user  
-- This is a **tracer**, not a full VM deobfuscator — heavily virtualized obfuscators may only yield partial logs  
++ attachment, code block, raw link, or reply to a message that has one.
