@@ -1,4 +1,4 @@
-"""Discord bot for logger/spy. Command .l — works on Wispbyte / Pydroid without Lune."""
+"""Discord bot for logger/spy. Commands .l (tracer) and .la (Aspect)."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def _load_token() -> str:
 TOKEN = _load_token()
 MAX_INPUT_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_PREVIEW = 1800
-LUNE_TIMEOUT = 25
+LUNE_TIMEOUT = 60  # Aspect can be slower
 
 ROOT = Path(__file__).resolve().parent.parent
 DUMPS = ROOT / "dumps"
@@ -177,11 +177,15 @@ async def run_tracer_python(source: str, stem: str) -> tuple[bool, str, str]:
         return False, f"python runner error: {e}", ""
 
 
-async def run_tracer_lune(source: str, stem: str) -> tuple[bool, str, str]:
+async def run_lune(source: str, stem: str, aspect: bool = False) -> tuple[bool, str, str]:
     in_path = ORIGINAL / f"{stem}.lua"
-    out_path = DUMPED / f"{stem}_reconstructed.lua"
+    suffix = "_aspect.lua" if aspect else "_reconstructed.lua"
+    out_path = DUMPED / f"{stem}{suffix}"
     in_path.write_text(source.replace("\r\n", "\n").replace("\r", "\n"), encoding="utf-8")
-    cmd = [LUNE_BIN, "run", str(RUNNER), str(in_path), str(out_path)]
+    cmd = [LUNE_BIN, "run", str(RUNNER)]
+    if aspect:
+        cmd.append("--aspect")
+    cmd.extend([str(in_path), str(out_path)])
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=str(ROOT), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -195,7 +199,8 @@ async def run_tracer_lune(source: str, stem: str) -> tuple[bool, str, str]:
         if out_path.is_file():
             reconstructed = out_path.read_text(encoding="utf-8", errors="replace")
             return True, str(out_path), reconstructed
-        return False, (stderr or stdout).decode("utf-8", errors="replace") or "no output", ""
+        err = (stderr or stdout).decode("utf-8", errors="replace") or "no output"
+        return False, err, ""
     except FileNotFoundError:
         return False, f"lune not found ({LUNE_BIN})", ""
     except Exception as e:
@@ -204,10 +209,16 @@ async def run_tracer_lune(source: str, stem: str) -> tuple[bool, str, str]:
 
 async def run_tracer(source: str, stem: str) -> tuple[bool, str, str]:
     if HAS_LUNE:
-        ok, path, text = await run_tracer_lune(source, stem)
+        ok, path, text = await run_lune(source, stem, aspect=False)
         if ok:
             return ok, path, text
     return await run_tracer_python(source, stem)
+
+
+async def run_aspect(source: str, stem: str) -> tuple[bool, str, str]:
+    if not HAS_LUNE:
+        return False, "Aspect requires Lune (not available on this host)", ""
+    return await run_lune(source, stem, aspect=True)
 
 
 def make_discord_file(text: str, filename: str) -> discord.File:
@@ -216,7 +227,7 @@ def make_discord_file(text: str, filename: str) -> discord.File:
     return discord.File(buf, filename=filename)
 
 
-async def handle_l(msg: discord.Message):
+async def handle_reconstruct(msg: discord.Message, *, aspect: bool):
     now = asyncio.get_event_loop().time()
     last = _cooldowns.get(msg.author.id, 0)
     if now - last < COOLDOWN_S:
@@ -227,8 +238,9 @@ async def handle_l(msg: discord.Message):
     async with msg.channel.typing():
         source, origin = await get_source_from_message(msg)
         if not source:
+            cmd = ".la" if aspect else ".l"
             await msg.reply(
-                "**`.l`** — reconstruct Lua\n"
+                f"**`{cmd}`** — reconstruct Lua\n"
                 "• file attachment\n• ``` code block\n• raw link\n• reply to a message with any of those\n\n"
                 f"_{origin}_"
             )
@@ -238,17 +250,27 @@ async def handle_l(msg: discord.Message):
             return
 
         stem = f"{msg.author.id}_{msg.id}"
-        ok, path_or_err, reconstructed = await run_tracer(source, stem)
+        if aspect:
+            ok, path_or_err, reconstructed = await run_aspect(source, stem)
+            mode = "aspect"
+            filename = "aspect_dump.lua"
+        else:
+            ok, path_or_err, reconstructed = await run_tracer(source, stem)
+            mode = "lune" if HAS_LUNE else "python-fallback"
+            filename = "reconstructed.lua"
+
         if not ok and not reconstructed:
             await msg.reply(f"reconstruction failed:\n```diff\n- {(path_or_err or 'error')[:500]}\n```")
             return
         if not reconstructed and Path(path_or_err).is_file():
             reconstructed = Path(path_or_err).read_text(encoding="utf-8", errors="replace")
 
-        mode = "lune" if HAS_LUNE else "python-fallback"
-        header = f"reconstructed for {msg.author.mention} ({mode})\norigin: `{origin}` · {len(source)} → {len(reconstructed)} chars"
+        header = (
+            f"reconstructed for {msg.author.mention} ({mode})\n"
+            f"origin: `{origin}` · {len(source)} → {len(reconstructed)} chars"
+        )
         try:
-            await msg.reply(header, file=make_discord_file(reconstructed, "reconstructed.lua"))
+            await msg.reply(header, file=make_discord_file(reconstructed, filename))
         except discord.HTTPException:
             await msg.reply(header + "\n```lua\n" + reconstructed[:MAX_OUTPUT_PREVIEW] + "\n```")
 
@@ -259,22 +281,25 @@ async def on_ready():
     print(f"HAS_LUNE={HAS_LUNE} bin={LUNE_BIN}")
     print(f"py_runner exists={PY_RUNNER.is_file()}")
     if not HAS_LUNE:
-        print("Using pure-Python fallback (Wispbyte / no Lune)")
+        print("Using pure-Python fallback for .l (Aspect / .la unavailable without Lune)")
 
 
 @client.event
 async def on_message(msg: discord.Message):
     if msg.author.bot:
         return
-    if re.match(r"^\.l(\s|$)", (msg.content or "").strip(), re.IGNORECASE):
+    content = (msg.content or "").strip()
+    try:
+        if re.match(r"^\.la(\s|$)", content, re.IGNORECASE):
+            await handle_reconstruct(msg, aspect=True)
+        elif re.match(r"^\.l(\s|$)", content, re.IGNORECASE):
+            await handle_reconstruct(msg, aspect=False)
+    except Exception:
+        traceback.print_exc()
         try:
-            await handle_l(msg)
+            await msg.reply("internal error — check bot logs")
         except Exception:
-            traceback.print_exc()
-            try:
-                await msg.reply("internal error — check bot logs")
-            except Exception:
-                pass
+            pass
 
 
 def main():
