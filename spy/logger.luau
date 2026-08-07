@@ -1,6 +1,3 @@
--- spy/logger.luau
-local stdio = require("@lune/stdio")
-
 local Logger = {
 	entries = {},
 	enabled = true,
@@ -28,21 +25,9 @@ function Logger:add(expression: string, level: string?)
 		time = os.clock(),
 		level = level,
 		expression = expression,
-	}
-	table.insert(self.entries, entry)
-
-	local color = stdio.color("white")
-	if level == "debug" then
-		color = stdio.color("cyan")
-	elseif level == "info" then
-		color = stdio.color("green")
-	elseif level == "warn" then
-		color = stdio.color("yellow")
-	elseif level == "error" then
-		color = stdio.color("red")
 	end
-
-	stdio.write(`{color}[{level:upper()}] {expression}{stdio.color("reset")}\n`)
+	table.insert(self.entries, entry)
+	print(`[ {level:upper()} ] {expression}`)
 end
 
 function Logger:debug(expression: string)

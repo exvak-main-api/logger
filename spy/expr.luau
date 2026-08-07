@@ -1,4 +1,3 @@
--- spy/expr.luau
 local Expr = {}
 
 local exprs: { [any]: any } = setmetatable({}, { __mode = "k" })
