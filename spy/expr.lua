@@ -1,23 +1,23 @@
--- spy/expr.lua
+-- spy/expr.luau
 local Expr = {}
 
-local exprs = setmetatable({}, { __mode = "k" })
-local meta = setmetatable({}, { __mode = "k" })
+local exprs: { [any]: any } = setmetatable({}, { __mode = "k" })
+local meta: { [any]: any } = setmetatable({}, { __mode = "k" })
 
-function Expr.set(proxy, expr)
-    exprs[proxy] = expr
+function Expr.set(proxy: any, expr: any)
+	exprs[proxy] = expr
 end
 
-function Expr.get(proxy)
-    return exprs[proxy]
+function Expr.get(proxy: any): any?
+	return exprs[proxy]
 end
 
-function Expr.setMeta(proxy, data)
-    meta[proxy] = data
+function Expr.setMeta(proxy: any, data: any)
+	meta[proxy] = data
 end
 
-function Expr.getMeta(proxy)
-    return meta[proxy]
+function Expr.getMeta(proxy: any): any?
+	return meta[proxy]
 end
 
 return Expr
