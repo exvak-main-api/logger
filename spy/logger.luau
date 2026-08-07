@@ -27,7 +27,7 @@ function Logger:add(expression: string, level: string?)
 		expression = expression,
 	end
 	table.insert(self.entries, entry)
-	print(`[ {level:upper()} ] {expression}`)
+	print(`[{level:upper()}] {expression}`)
 end
 
 function Logger:debug(expression: string)
@@ -50,10 +50,32 @@ function Logger:clear()
 	table.clear(self.entries)
 end
 
+function Logger:count(): number
+	return #self.entries
+end
+
+function Logger:filter(pattern: string): { string }
+	local out = {}
+	for _, entry in self.entries do
+		if string.find(entry.expression, pattern, 1, true) then
+			table.insert(out, entry.expression)
+		end
+	end
+	return out
+end
+
 function Logger:dump(): string
 	local result = {}
 	for _, entry in self.entries do
 		table.insert(result, `[{entry.time}][{entry.level:upper()}] {entry.expression}`)
+	end
+	return table.concat(result, "\n")
+end
+
+function Logger:dumpExpressions(): string
+	local result = {}
+	for _, entry in self.entries do
+		table.insert(result, entry.expression)
 	end
 	return table.concat(result, "\n")
 end
