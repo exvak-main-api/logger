@@ -1,29 +1,78 @@
 --[[
-  runner.luau — execute user Lua inside the tracer sandbox and emit reconstructed source.
-  Usage: lune run runner.luau <input.lua> [output.lua]
+  runner.luau — execute user Lua through either:
+    1) the lightweight expression-tree tracer (default)
+    2) Aspect full environment dumper (--aspect)
+
+  Usage:
+    lune run runner.luau <input.lua> [output.lua]
+    lune run runner.luau --aspect <input.lua> [output.lua]
+    lune run runner.luau --tracer <input.lua> [output.lua]   (explicit default)
 ]]
 
 local fs = require("@lune/fs")
 local process = require("@lune/process")
-local task = require("@lune/task")
 local luau = require("@lune/luau")
 
 local Logger = require("./logger")
 local Sandbox = require("./sandbox")
 
 local args = process.args
-if #args < 1 then
-	warn("usage: lune run runner.luau <input.lua> [output.lua]")
+local mode = "tracer" -- tracer | aspect
+local positional = {}
+
+for _, a in args do
+	if a == "--aspect" or a == "-a" or a == "aspect" then
+		mode = "aspect"
+	elseif a == "--tracer" or a == "-t" or a == "tracer" then
+		mode = "tracer"
+	else
+		table.insert(positional, a)
+	end
+end
+
+if #positional < 1 then
+	warn("usage: lune run runner.luau [--aspect|--tracer] <input.lua> [output.lua]")
 	process.exit(1)
 end
 
-local inputPath = args[1]
-local outputPath = args[2] or (inputPath:gsub("%.lua[u]?$", "") .. "_reconstructed.lua")
+local inputPath = positional[1]
+local outputPath = positional[2]
 
 if not fs.isFile(inputPath) then
 	warn("input file not found: " .. inputPath)
 	process.exit(1)
 end
+
+---------------------------------------------------------------------------
+-- Aspect path
+---------------------------------------------------------------------------
+if mode == "aspect" then
+	local Bridge = require("./aspect_bridge")
+	local okAvail, availErr = Bridge.available()
+	if not okAvail then
+		warn("aspect unavailable: " .. tostring(availErr))
+		process.exit(1)
+	end
+
+	local out = outputPath or (inputPath:gsub("%.lua[u]?$", "") .. "_aspect.lua")
+	local ok, pathOrErr, stats = Bridge.dumpFile(inputPath, out)
+	if not ok then
+		warn("aspect failed: " .. tostring(pathOrErr))
+		process.exit(1)
+	end
+
+	print("success")
+	print(pathOrErr)
+	if stats then
+		print(string.format("lines=%s remotes=%s proxies=%s", tostring(stats.lines), tostring(stats.remotes), tostring(stats.proxies)))
+	end
+	process.exit(0)
+end
+
+---------------------------------------------------------------------------
+-- Default tracer path (original behaviour)
+---------------------------------------------------------------------------
+outputPath = outputPath or (inputPath:gsub("%.lua[u]?$", "") .. "_reconstructed.lua")
 
 local source = fs.readFile(inputPath)
 Logger:clear()
@@ -99,7 +148,7 @@ local ran, runErr = pcall(function()
 end)
 
 local lines = {}
-table.insert(lines, "-- reconstructed by logger/spy")
+table.insert(lines, "-- reconstructed by logger/spy (tracer)")
 table.insert(lines, "-- source: " .. inputPath)
 table.insert(lines, "")
 

@@ -2,7 +2,7 @@
 
 Expression-tree based Roblox/Luau **tracer sandbox** that reconstructs executed code for logging and readable dumps.
 
-Also includes a **Discord bot** with the `.l` command.
+Also includes **Aspect** (full environment dumper) and a **Discord bot** with the `.l` command.
 
 ## Modules
 
@@ -12,22 +12,56 @@ Also includes a **Discord bot** with the `.l` command.
 | `expr.luau` | Weak expression storage |
 | `compiler.luau` | Expression → source |
 | `proxy.luau` | Operator-overloading proxies |
-| `sandbox.luau` | Full executor API surface (UNC-style) |
-| `runner.luau` | CLI: run a script through the sandbox → reconstructed output |
-| `test.luau` | Lune smoke test |
-| `bot/discord_bot.py` | Discord bot (`.l` command) |
+| `sandbox.luau` | Lightweight executor API surface (UNC-style) |
+| `runner.luau` | CLI: tracer **or** Aspect dump |
+| `aspect.lua` | Full Aspect environment emulator / dumper |
+| `aspect_bridge.luau` | Stable API over Aspect for the rest of the package |
+| `test.luau` | Lune smoke test (tracer) |
+| `bot/discord_bot.py` | Discord bot (`.l` / `.la`) |
 
-## Lune CLI
+## Two backends
+
+### 1. Tracer (default, lightweight)
+
+Runs the script inside the expression-tree sandbox and emits reconstructed calls.
 
 ```bash
-# smoke test
-lune run test.luau
-
-# reconstruct a script
 lune run runner.luau path/to/script.lua dumps/out.lua
+# or explicit
+lune run runner.luau --tracer path/to/script.lua dumps/out.lua
 ```
 
-## Discord bot (`.l`)
+### 2. Aspect (heavy, high-fidelity)
+
+Uses the full Aspect emulator (from `aspect.lua`) for deeper dumps of obfuscated / executor-heavy scripts.
+
+```bash
+lune run runner.luau --aspect path/to/script.lua dumps/out_aspect.lua
+# short flag
+lune run runner.luau -a path/to/script.lua
+```
+
+**Note:** Aspect expects a Roblox API dump at `core/io/apidump.json` relative to the working directory when it starts. If that file is missing, Aspect will fail on load — place a valid dump there or run from a tree that already has one.
+
+## Package require
+
+```lua
+local spy = require("./init")
+-- tracer pieces
+local env = spy.Sandbox.create()
+-- Aspect (lazy)
+local aspect = spy.aspect()
+local bridge = spy.bridge()
+local ok, path = bridge.dumpFile("in.lua", "out.lua")
+```
+
+## Lune smoke test
+
+```bash
+lune run test.luau
+```
+
+## Discord bot
 
 ```bash
 pip install -r bot/requirements.txt
@@ -35,18 +69,17 @@ export DISCORD_BOT_TOKEN=your_token
 python bot/discord_bot.py
 ```
 
-Then in Discord:
+| Command | Backend |
+|---------|---------|
+| `.l` | Tracer (Lune) → Python fallback |
+| `.la` | Aspect (Lune only) |
 
-```
-.l
-```
-
-with a **file**, **``` code block**, or **raw link** (or reply to a message that has one).
-
-The bot runs the code through the tracer and replies with `reconstructed.lua`.
+Attach a file, paste a ``` code block, or send a raw link (or reply to a message that has one).
 
 See [bot/README.md](bot/README.md) for details.
 
-## Coverage (sandbox)
+## Coverage (tracer sandbox)
 
 Environments, closures/hooks, metatables, identity, instances/signals, scripts, filesystem, input, Drawing, crypt, syn/oth, cache, rconsole, debug.*, and common aliases from UNC/sUNC-style executors.
+
+Aspect covers a much larger surface (full proxy game/workspace, hooks, crypt, Drawing, WebSocket, etc.) and is better for heavily obfuscated dumps.
